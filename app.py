@@ -2,12 +2,56 @@ import streamlit as st
 from openai import OpenAI
 from dotenv import load_dotenv
 import os
+import json
 from pypdf import PdfReader
 import matplotlib.pyplot as plt
+import google.generativeai as genai
 
 # ---------- LOAD ENV ----------
+env_path = ".env"
+if not os.path.exists(env_path):
+    with open(env_path, "w") as f:
+        f.write("")
 load_dotenv()
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+# ---------- HELPER FUNCTIONS ----------
+def save_key(key_name, key_value):
+    os.environ[key_name] = key_value
+    env_file = ".env"
+    if not os.path.exists(env_file):
+        with open(env_file, "w") as f: f.write("")
+        
+    with open(env_file, "r") as f: lines = f.readlines()
+    
+    with open(env_file, "w") as f:
+        found = False
+        for line in lines:
+            if line.startswith(f"{key_name}="):
+                f.write(f"{key_name}={key_value}\n")
+                found = True
+            else:
+                f.write(line)
+        if not found:
+            f.write(f"\n{key_name}={key_value}\n")
+
+def get_llm_response(model, system, user_text):
+    if model == "ChatGPT":
+        client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user_text}
+            ],
+            temperature=0.3
+        )
+        return response.choices[0].message.content
+    elif model == "Gemini":
+        genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+        model_instance = genai.GenerativeModel('gemini-3-flash-preview')
+        response = model_instance.generate_content(system + "\n\n" + user_text)
+        return response.text
+    return "Error: No model selected."
 
 # ---------- PAGE CONFIG ----------
 st.set_page_config(
@@ -39,6 +83,7 @@ Include:
 4. Emergency warning signs
 
 Use simple language.
+Do not output internal thought processes or reasoning traces.
 End with a medical disclaimer.
 """
 
@@ -52,12 +97,28 @@ Mention:
 - When to consult a doctor
 
 Do not diagnose or prescribe.
+Do not output internal thought processes or reasoning traces.
 End with a disclaimer.
 """
 
-# ---------- SESSION STATE ----------
+# ---------- SESSION STATE & DATA PERSISTENCE ----------
+DATA_FILE = "health_data.json"
+
+def load_data():
+    if os.path.exists(DATA_FILE):
+        with open(DATA_FILE, "r") as f:
+            try:
+                return json.load(f)
+            except json.JSONDecodeError:
+                return []
+    return []
+
+def save_data(data):
+    with open(DATA_FILE, "w") as f:
+        json.dump(data, f)
+
 if "severity_trend" not in st.session_state:
-    st.session_state.severity_trend = []
+    st.session_state.severity_trend = load_data()
 
 # ---------- SYMPTOM EXTRACTION ----------
 def extract_symptoms(text):
@@ -70,6 +131,44 @@ def extract_symptoms(text):
     return [k for k in keywords if k in text]
 
 # ---------- SIDEBAR ----------
+st.sidebar.markdown("## ⚙️ Model Settings")
+
+# Check available keys to set default
+has_openai = os.getenv("OPENAI_API_KEY") is not None
+has_gemini = os.getenv("GEMINI_API_KEY") is not None
+saved_model = os.getenv("SELECTED_MODEL")
+
+# Determine default selection
+if saved_model == "ChatGPT":
+    default_idx = 0
+elif saved_model == "Gemini":
+    default_idx = 1
+elif has_gemini and not has_openai:
+    default_idx = 1
+elif has_openai:
+    default_idx = 0
+else:
+    default_idx = None
+
+model_choice = st.sidebar.radio("Select Model", ["ChatGPT", "Gemini"], index=default_idx)
+
+if model_choice:
+    # Save selection if changed
+    if model_choice != saved_model:
+        save_key("SELECTED_MODEL", model_choice)
+        
+    required_key = "OPENAI_API_KEY" if model_choice == "ChatGPT" else "GEMINI_API_KEY"
+    if not os.getenv(required_key):
+        st.sidebar.warning(f"⚠️ {model_choice} Key Missing")
+        user_key = st.sidebar.text_input(f"Enter Key", type="password")
+        if user_key:
+            save_key(required_key, user_key)
+            st.rerun()
+else:
+    required_key = None
+    st.sidebar.info("Please select a model to continue.")
+
+st.sidebar.markdown("---")
 st.sidebar.markdown("## 🧭 Navigation")
 page = st.sidebar.radio(
     "Choose a section",
@@ -94,28 +193,30 @@ if page == "Medical Assistant":
 
     if st.button("Get Medical Advice"):
         if user_input.strip():
-            with st.spinner("Analyzing symptoms..."):
-                response = client.chat.completions.create(
-                    model="gpt-4o-mini",
-                    messages=[
-                        {"role": "system", "content": SYSTEM_PROMPT},
-                        {"role": "user", "content": user_input}
-                    ],
-                    temperature=0.3
-                )
-                answer = response.choices[0].message.content
+            if not model_choice:
+                st.error("Please select a model in the sidebar.")
+            else:
+                with st.spinner(f"Analyzing symptoms with {model_choice}..."):
+                    if not os.getenv(required_key):
+                        st.error(f"Please set the {model_choice} API key in the sidebar.")
+                    else:
+                        try:
+                            answer = get_llm_response(model_choice, SYSTEM_PROMPT, user_input)
+                            
+                            with st.container(border=True):
+                                st.subheader("🩺 Medical Insight")
+                                st.write(answer)
 
-            with st.container(border=True):
-                st.subheader("🩺 Medical Insight")
-                st.write(answer)
-
-            # ---- analytics ----
-            symptoms = extract_symptoms(user_input)
-            st.session_state.severity_trend.append(len(symptoms))
-        else:
-            st.warning("Please enter your symptoms.")
-
-# ===============================
+                            # ---- analytics ----
+                            symptoms = extract_symptoms(user_input)
+                            st.session_state.severity_trend.append(len(symptoms))
+                            save_data(st.session_state.severity_trend)
+                        except Exception as e:
+                            error_msg = str(e)
+                            if "insufficient_quota" in error_msg:
+                                st.error("🚨 OpenAI API Quota Exceeded. Please check your billing details or switch to Gemini.")
+                            else:
+                                st.error(f"An error occurred: {e}")
 # HEALTH DASHBOARD
 # ===============================
 elif page == "Health Dashboard":
@@ -178,20 +279,25 @@ elif page == "Medical Report Explainer":
             extracted_text += p.extract_text() + "\n"
 
         if st.button("Explain Report"):
-            with st.spinner("Analyzing report..."):
-                response = client.chat.completions.create(
-                    model="gpt-4o-mini",
-                    messages=[
-                        {"role": "system", "content": PDF_PROMPT},
-                        {"role": "user", "content": extracted_text[:12000]}
-                    ],
-                    temperature=0.2
-                )
-                explanation = response.choices[0].message.content
+            if not model_choice:
+                st.error("Please select a model in the sidebar.")
+            else:
+                with st.spinner(f"Analyzing report with {model_choice}..."):
+                    if not os.getenv(required_key):
+                        st.error(f"Please set the {model_choice} API key in the sidebar.")
+                    else:
+                        try:
+                            explanation = get_llm_response(model_choice, PDF_PROMPT, extracted_text[:12000])
 
-            with st.container(border=True):
-                st.subheader("🧾 Report Explanation")
-                st.write(explanation)
+                            with st.container(border=True):
+                                st.subheader("🧾 Report Explanation")
+                                st.write(explanation)
+                        except Exception as e:
+                            error_msg = str(e)
+                            if "insufficient_quota" in error_msg:
+                                st.error("🚨 OpenAI API Quota Exceeded. Please check your billing details or switch to Gemini.")
+                            else:
+                                st.error(f"An error occurred: {e}")
 
 # ---------- FOOTER ----------
 st.markdown("---")

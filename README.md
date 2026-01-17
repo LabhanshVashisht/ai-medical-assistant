@@ -1,19 +1,21 @@
 # 🩺 AI Medical Assistant
 
-An AI-powered medical assistant built with **Streamlit** and **OpenAI**, featuring:
+An AI-powered medical assistant built with **Streamlit**, **OpenAI**, and **Gemini**, featuring:
 - Expert medical guidance (educational use)
 - Health analysis dashboard with trend visualization
 - Medical report (PDF) explanation
-- Privacy-first design
+- Data persistence for health trends
+- Multi-model support (ChatGPT & Google Gemini)
 
 ---
 
 ## 🚀 Features
 
 - 🧠 AI medical assistant (non-diagnostic)
-- 📈 Health analysis dashboard (line graphs)
+- 📈 Health analysis dashboard with persistent tracking
 - 📄 Medical report PDF explanation
-- 🔒 Privacy mode (no data stored)
+- ⚙️ Dynamic model switching (ChatGPT / Gemini)
+- 🔑 In-app API key management
 - ⚠️ Medical safety & disclaimers
 
 ---
@@ -23,6 +25,7 @@ An AI-powered medical assistant built with **Streamlit** and **OpenAI**, featuri
 - Python
 - Streamlit
 - OpenAI API
+- Google Gemini API
 - Matplotlib
 - PyPDF
 
@@ -34,3 +37,23 @@ An AI-powered medical assistant built with **Streamlit** and **OpenAI**, featuri
 git clone https://github.com/your-username/ai-medical-assistant.git
 cd ai-medical-assistant
 pip install -r requirements.txt
+```
+
+## 🔑 Setup
+
+The app automatically manages your API keys. When you run the app:
+1. Select your preferred model (ChatGPT or Gemini)
+2. If no API key is found, you will be prompted to enter it securely in the sidebar
+3. Keys and preferences are saved locally in a `.env` file
+
+Alternatively, you can manually create a `.env` file:
+```env
+OPENAI_API_KEY=your_openai_key
+GEMINI_API_KEY=your_gemini_key
+```
+
+## ▶️ Usage
+
+```bash
+python -m streamlit run app.py
+```
