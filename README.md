@@ -1,7 +1,7 @@
 # 🩺 AI Medical Assistant
 
-An AI-powered medical assistant built with **Streamlit**, **OpenAI**, and **Gemini**, featuring:
-- Expert medical guidance (educational use)
+An AI-powered medical chatbot built with **Streamlit**, **OpenAI**, and **Gemini**, featuring:
+- Conversational medical guidance with memory
 - Multi-modal analysis (Text & Images)
 - Health analysis dashboard with trend visualization
 - Medical report (PDF) explanation
@@ -12,13 +12,14 @@ An AI-powered medical assistant built with **Streamlit**, **OpenAI**, and **Gemi
 
 ## 🚀 Features
 
-- 🧠 AI medical assistant (non-diagnostic)
-- 👁️ Medical image analysis (rashes, x-rays, etc.)
-- 📈 Health analysis dashboard with persistent tracking
-- 📄 Medical report PDF explanation
-- ⚙️ Dynamic model switching (ChatGPT / Gemini)
-- 🔑 In-app API key management
-- ⚠️ Medical safety & disclaimers
+- 🧠 **Conversational AI Chatbot** with context memory
+- 👁️ **Medical Image Analysis** (rashes, x-rays, etc.) via popup
+- 📈 **Health Dashboard** with persistent symptom tracking
+- 📄 **Medical Report Explainer** (PDF support)
+- ⚙️ **Multi-Model Support** (Switch between ChatGPT & Gemini)
+- 🔑 **Secure Key Management** (Auto-save to .env)
+- 🛡️ **Data Controls** (Clear history & Reset keys safely)
+- ⚠️ **Medical Safety** & educational disclaimers
 
 ---
 

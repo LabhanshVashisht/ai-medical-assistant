@@ -37,29 +37,35 @@ def save_key(key_name, key_value):
         if not found:
             f.write(f"\n{key_name}={key_value}\n")
 
-def get_llm_response(model, system, user_text, image_data=None):
+def get_llm_response(model, system, messages_history, image_data=None):
     if model == "ChatGPT":
         client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
         
-        messages = [{"role": "system", "content": system}]
+        # Prepare messages properly
+        final_messages = [{"role": "system", "content": system}]
         
-        user_content = [{"type": "text", "text": user_text}]
-        
-        if image_data:
-            # image_data expected to be a PIL Image
-            buffered = io.BytesIO()
-            image_data.save(buffered, format="JPEG")
-            img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
-            user_content.append({
-                "type": "image_url",
-                "image_url": {"url": f"data:image/jpeg;base64,{img_str}"}
-            })
+        for msg in messages_history:
+            role = msg["role"]
+            content = msg["content"]
             
-        messages.append({"role": "user", "content": user_content})
+            # If it's the last user message and has image
+            if role == "user" and image_data and msg == messages_history[-1]:
+                user_content = [{"type": "text", "text": content}]
+                # image_data expected to be a PIL Image
+                buffered = io.BytesIO()
+                image_data.save(buffered, format="JPEG")
+                img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
+                user_content.append({
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/jpeg;base64,{img_str}"}
+                })
+                final_messages.append({"role": "user", "content": user_content})
+            else:
+                final_messages.append({"role": role, "content": content})
 
         response = client.chat.completions.create(
             model="gpt-4o-mini",
-            messages=messages,
+            messages=final_messages,
             temperature=0.3
         )
         return response.choices[0].message.content
@@ -68,11 +74,37 @@ def get_llm_response(model, system, user_text, image_data=None):
         genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
         model_instance = genai.GenerativeModel('gemini-3-flash-preview')
         
-        content = [system + "\n\n" + user_text]
-        if image_data:
-            content.append(image_data)
+        # Construct chat history for Gemini
+        chat_history = []
+        # Gemini expects alternate parts or a list of contents.
+        # We'll just build a large prompt or use start_chat if we convert properly.
+        # Simplest for now: concatenate context + use start_chat if structured
+        # Let's map to content format
+        
+        gemini_messages = []
+        
+        # Add system prompt as a user message or directive at start
+        gemini_messages.append({"role": "user", "parts": [system]})
+        gemini_messages.append({"role": "model", "parts": ["Understood. I will act as the medical assistant."]})
+
+        for msg in messages_history:
+            role = "user" if msg["role"] == "user" else "model"
+            parts = [msg["content"]]
             
-        response = model_instance.generate_content(content)
+            if role == "user" and image_data and msg == messages_history[-1]:
+                 parts.append(image_data)
+            
+            gemini_messages.append({"role": role, "parts": parts})
+            
+        # Normally start_chat expects history to not include the last message technically if we use send_message
+        # But here we are doing a single generation usually.
+        # Let's just pass the full list to generate_content? No, generate_content takes a list of parts (single turn) usually unless formatted.
+        # Correct way for multi-turn in Gemini:
+        
+        chat = model_instance.start_chat(history=gemini_messages[:-1])
+        last_msg = gemini_messages[-1]
+        response = chat.send_message(last_msg["parts"])
+        
         return response.text
     return "Error: No model selected."
 
@@ -143,6 +175,9 @@ def save_data(data):
 if "severity_trend" not in st.session_state:
     st.session_state.severity_trend = load_data()
 
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
 # ---------- SYMPTOM EXTRACTION ----------
 def extract_symptoms(text):
     keywords = [
@@ -154,6 +189,10 @@ def extract_symptoms(text):
     return [k for k in keywords if k in text]
 
 # ---------- SIDEBAR ----------
+if st.sidebar.button("➕ New Chat"):
+    st.session_state.messages = []
+    st.rerun()
+
 st.sidebar.markdown("## ⚙️ Model Settings")
 
 # Check available keys to set default
@@ -199,6 +238,38 @@ page = st.sidebar.radio(
 )
 
 st.sidebar.markdown("---")
+st.sidebar.markdown("### 🛑 Danger Zone")
+d_col1, d_col2 = st.sidebar.columns(2)
+
+with d_col1.popover("Clear Data", use_container_width=True):
+    st.markdown("### ⚠️ Delete All Data?")
+    st.warning("This will permanently delete your chat history and health dashboard trends.")
+    if st.button("Yes, Delete Everything", type="primary"):
+        if os.path.exists(DATA_FILE):
+            os.remove(DATA_FILE)
+        st.session_state.severity_trend = []
+        st.session_state.messages = []
+        st.rerun()
+
+with d_col2.popover("Reset Keys", use_container_width=True):
+    st.markdown("### 🔑 Reset API Keys?")
+    st.info("This will remove your saved API keys from the application. You will need to enter them again.")
+    if st.button("Confirm Reset"):
+        # Clear keys from .env
+        if os.path.exists(".env"):
+            with open(".env", "r") as f:
+                lines = f.readlines()
+            with open(".env", "w") as f:
+                for line in lines:
+                    if not any(k in line for k in ["OPENAI_API_KEY", "GEMINI_API_KEY", "SELECTED_MODEL"]):
+                        f.write(line)
+        # Clear env vars
+        for key in ["OPENAI_API_KEY", "GEMINI_API_KEY", "SELECTED_MODEL"]:
+            if key in os.environ:
+                del os.environ[key]
+        st.rerun()
+
+st.sidebar.markdown("---")
 st.sidebar.info("⚠️ Educational use only")
 
 # ===============================
@@ -206,52 +277,73 @@ st.sidebar.info("⚠️ Educational use only")
 # ===============================
 if page == "Medical Assistant":
 
-    st.subheader("🧠 Describe Your Symptoms")
+    st.subheader("🧠 Medical Consultant Chat")
 
-    user_input = st.text_area(
-        "Describe your symptoms",
-        placeholder="Example: I have fever and headache for two days...",
-        height=130,
-        label_visibility="collapsed"
-    )
-
-    uploaded_image = st.file_uploader("Upload an image (optional)", type=["jpg", "jpeg", "png"])
+    # Describe Symptoms Input (Standard Chat Interface)
     
+    # Display chat history
+    for message in st.session_state.messages:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
+
+    # Image Uploader (Popup)
     image_data = None
-    if uploaded_image:
-        image_data = Image.open(uploaded_image)
-        st.image(image_data, caption="Uploaded Image", width=300)
+    with st.popover("📎 Add Image"):
+        st.markdown("### Upload Medical Image")
+        uploaded_image = st.file_uploader(
+            "Upload Image", 
+            type=["jpg", "jpeg", "png"], 
+            key="chat_image",
+            label_visibility="collapsed"
+        )
+        
+        if uploaded_image:
+            image_data = Image.open(uploaded_image)
+            st.image(image_data, caption="Image Preview", width=200)
 
-    if st.button("Get Medical Advice"):
-        if user_input.strip() or image_data:
-            if not model_choice:
-                st.error("Please select a model in the sidebar.")
-            else:
-                with st.spinner(f"Analyzing with {model_choice}..."):
-                    if not os.getenv(required_key):
-                        st.error(f"Please set the {model_choice} API key in the sidebar.")
-                    else:
-                        try:
-                            # Pass user_input defaults to "Analyze the image" if empty but image exists
-                            prompt_text = user_input if user_input.strip() else "Analyze this medical image."
-                            answer = get_llm_response(model_choice, SYSTEM_PROMPT, prompt_text, image_data)
-                            
-                            with st.container(border=True):
-                                st.subheader("🩺 Medical Insight")
-                                st.write(answer)
+    # Chat Input
+    if prompt := st.chat_input("Describe symptoms..."):
+        
+        # Add User Message to History
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        with st.chat_message("user"):
+            st.markdown(prompt)
+            
+        if not model_choice:
+            st.error("Please select a model in the sidebar.")
+        else:
+            with st.spinner(f"Analyzing with {model_choice}..."):
+                if not os.getenv(required_key):
+                    st.error(f"Please set the {model_choice} API key in the sidebar.")
+                else:
+                    try:
+                        # Call LLM with full history
+                        answer = get_llm_response(
+                            model_choice, 
+                            SYSTEM_PROMPT, 
+                            st.session_state.messages, 
+                            image_data
+                        )
+                        
+                        # Add Assistant Message to History
+                        st.session_state.messages.append({"role": "assistant", "content": answer})
+                        with st.chat_message("assistant"):
+                            st.markdown(answer)
 
-                            # ---- analytics ----
-                            symptoms = extract_symptoms(user_input)                            
-                            st.session_state.severity_trend.append(len(symptoms))
-                            save_data(st.session_state.severity_trend)
-                        except Exception as e:
-                            save_data(st.session_state.severity_trend)
-                        except Exception as e:
-                            error_msg = str(e)
-                            if "insufficient_quota" in error_msg:
-                                st.error("🚨 OpenAI API Quota Exceeded. Please check your billing details or switch to Gemini.")
-                            else:
-                                st.error(f"An error occurred: {e}")
+                        # ---- analytics ----
+                        # Only extract from latest prompt for trend
+                        symptoms = extract_symptoms(prompt)                            
+                        st.session_state.severity_trend.append(len(symptoms))
+                        save_data(st.session_state.severity_trend)
+                        
+                    except Exception as e:
+                        error_msg = str(e)
+                        if "insufficient_quota" in error_msg:
+                            st.error("🚨 OpenAI API Quota Exceeded. Please check your billing details or switch to Gemini.")
+                        elif "429" in error_msg:
+                            st.error("🚨 Gemini API Rate Limit Exceeded. You are strictly rate-limited on the free tier. Please wait a minute or use another model.")
+                        else:
+                            st.error(f"An error occurred: {e}")
 # HEALTH DASHBOARD
 # ===============================
 elif page == "Health Dashboard":
@@ -322,7 +414,8 @@ elif page == "Medical Report Explainer":
                         st.error(f"Please set the {model_choice} API key in the sidebar.")
                     else:
                         try:
-                            explanation = get_llm_response(model_choice, PDF_PROMPT, extracted_text[:12000])
+                            # Use list format for compatibility with new get_llm_response signature
+                            explanation = get_llm_response(model_choice, PDF_PROMPT, [{"role": "user", "content": extracted_text[:12000]}])
 
                             with st.container(border=True):
                                 st.subheader("🧾 Report Explanation")
@@ -331,6 +424,8 @@ elif page == "Medical Report Explainer":
                             error_msg = str(e)
                             if "insufficient_quota" in error_msg:
                                 st.error("🚨 OpenAI API Quota Exceeded. Please check your billing details or switch to Gemini.")
+                            elif "429" in error_msg:
+                                st.error("🚨 Gemini API Rate Limit Exceeded. You are strictly rate-limited on the free tier. Please wait a minute or use another model.")
                             else:
                                 st.error(f"An error occurred: {e}")
 
