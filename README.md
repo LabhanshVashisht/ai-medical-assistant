@@ -2,6 +2,7 @@
 
 An AI-powered medical assistant built with **Streamlit**, **OpenAI**, and **Gemini**, featuring:
 - Expert medical guidance (educational use)
+- Multi-modal analysis (Text & Images)
 - Health analysis dashboard with trend visualization
 - Medical report (PDF) explanation
 - Data persistence for health trends
@@ -12,6 +13,7 @@ An AI-powered medical assistant built with **Streamlit**, **OpenAI**, and **Gemi
 ## 🚀 Features
 
 - 🧠 AI medical assistant (non-diagnostic)
+- 👁️ Medical image analysis (rashes, x-rays, etc.)
 - 📈 Health analysis dashboard with persistent tracking
 - 📄 Medical report PDF explanation
 - ⚙️ Dynamic model switching (ChatGPT / Gemini)
@@ -28,6 +30,7 @@ An AI-powered medical assistant built with **Streamlit**, **OpenAI**, and **Gemi
 - Google Gemini API
 - Matplotlib
 - PyPDF
+- Pillow (Image Processing)
 
 ---
 

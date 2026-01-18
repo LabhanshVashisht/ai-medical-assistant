@@ -3,6 +3,9 @@ from openai import OpenAI
 from dotenv import load_dotenv
 import os
 import json
+import base64
+import io
+from PIL import Image
 from pypdf import PdfReader
 import matplotlib.pyplot as plt
 import google.generativeai as genai
@@ -34,22 +37,42 @@ def save_key(key_name, key_value):
         if not found:
             f.write(f"\n{key_name}={key_value}\n")
 
-def get_llm_response(model, system, user_text):
+def get_llm_response(model, system, user_text, image_data=None):
     if model == "ChatGPT":
         client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        
+        messages = [{"role": "system", "content": system}]
+        
+        user_content = [{"type": "text", "text": user_text}]
+        
+        if image_data:
+            # image_data expected to be a PIL Image
+            buffered = io.BytesIO()
+            image_data.save(buffered, format="JPEG")
+            img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
+            user_content.append({
+                "type": "image_url",
+                "image_url": {"url": f"data:image/jpeg;base64,{img_str}"}
+            })
+            
+        messages.append({"role": "user", "content": user_content})
+
         response = client.chat.completions.create(
             model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": user_text}
-            ],
+            messages=messages,
             temperature=0.3
         )
         return response.choices[0].message.content
+        
     elif model == "Gemini":
         genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
         model_instance = genai.GenerativeModel('gemini-3-flash-preview')
-        response = model_instance.generate_content(system + "\n\n" + user_text)
+        
+        content = [system + "\n\n" + user_text]
+        if image_data:
+            content.append(image_data)
+            
+        response = model_instance.generate_content(content)
         return response.text
     return "Error: No model selected."
 
@@ -186,30 +209,42 @@ if page == "Medical Assistant":
     st.subheader("🧠 Describe Your Symptoms")
 
     user_input = st.text_area(
-        "",
+        "Describe your symptoms",
         placeholder="Example: I have fever and headache for two days...",
-        height=130
+        height=130,
+        label_visibility="collapsed"
     )
 
+    uploaded_image = st.file_uploader("Upload an image (optional)", type=["jpg", "jpeg", "png"])
+    
+    image_data = None
+    if uploaded_image:
+        image_data = Image.open(uploaded_image)
+        st.image(image_data, caption="Uploaded Image", width=300)
+
     if st.button("Get Medical Advice"):
-        if user_input.strip():
+        if user_input.strip() or image_data:
             if not model_choice:
                 st.error("Please select a model in the sidebar.")
             else:
-                with st.spinner(f"Analyzing symptoms with {model_choice}..."):
+                with st.spinner(f"Analyzing with {model_choice}..."):
                     if not os.getenv(required_key):
                         st.error(f"Please set the {model_choice} API key in the sidebar.")
                     else:
                         try:
-                            answer = get_llm_response(model_choice, SYSTEM_PROMPT, user_input)
+                            # Pass user_input defaults to "Analyze the image" if empty but image exists
+                            prompt_text = user_input if user_input.strip() else "Analyze this medical image."
+                            answer = get_llm_response(model_choice, SYSTEM_PROMPT, prompt_text, image_data)
                             
                             with st.container(border=True):
                                 st.subheader("🩺 Medical Insight")
                                 st.write(answer)
 
                             # ---- analytics ----
-                            symptoms = extract_symptoms(user_input)
+                            symptoms = extract_symptoms(user_input)                            
                             st.session_state.severity_trend.append(len(symptoms))
+                            save_data(st.session_state.severity_trend)
+                        except Exception as e:
                             save_data(st.session_state.severity_trend)
                         except Exception as e:
                             error_msg = str(e)
