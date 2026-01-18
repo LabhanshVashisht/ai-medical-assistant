@@ -80,7 +80,7 @@ def get_llm_response(model, system, user_text, image_data=None):
 st.set_page_config(
     page_title="AI Medical Assistant",
     page_icon="🩺",
-    layout="wide"
+    layout="centered"
 )
 
 # ---------- HERO HEADER ----------
