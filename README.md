@@ -34,7 +34,7 @@ An AI-powered medical assistant built with **Streamlit**, **OpenAI**, and **Gemi
 ## ⚙️ Installation
 
 ```bash
-git clone https://github.com/your-username/ai-medical-assistant.git
+git clone https://github.com/LabhanshVashisht/ai-medical-assistant.git
 cd ai-medical-assistant
 pip install -r requirements.txt
 ```
