@@ -13,6 +13,7 @@ An AI-powered medical chatbot built with **Streamlit**, **OpenAI**, and **Gemini
 ## 🚀 Features
 
 - 🧠 **Conversational AI Chatbot** with context memory
+- 🔄 **Smart Retry** Mechanism (Regenerate responses instantly)
 - 👁️ **Medical Image Analysis** (rashes, x-rays, etc.) via popup
 - 📈 **Health Dashboard** with persistent symptom tracking
 - 📄 **Medical Report Explainer** (PDF support)
