@@ -3,7 +3,7 @@ import os
 
 def gemini_response(system, messages_history, image_data=None):
         genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-        model_instance = genai.GenerativeModel('gemini-3-flash-preview')
+        model_instance = genai.GenerativeModel('gemini-2.5-flash')
         
         # Construct chat history for Gemini
         chat_history = []
@@ -47,8 +47,9 @@ def gemini_response(system, messages_history, image_data=None):
             response = chat.send_message(
                 last_msg["parts"],
                 generation_config={
-                    "max_output_tokens": 150,
-                    "temperature": 0.2
+                    "max_output_tokens": 400,
+                    "temperature": 0.4,
+                    "top_p": 0.9
                 },
                 safety_settings=safety_settings
             )

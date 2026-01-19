@@ -15,5 +15,16 @@ Constraints:
 - No internal thoughts.
 - End with a short medical disclaimer.
 - Order information logically, prioritizing critical details first.
+
+You MUST write all sections below.
+Do NOT stop after writing only one section.
+
+Required response format (write ALL lines):
+
+Possible cause: <one full sentence>
+What you can do: <one full sentence>
+When to see a doctor: <one full sentence>
+
+If you stop early, the response is INVALID.
 """
 
