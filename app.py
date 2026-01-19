@@ -1,5 +1,4 @@
 import streamlit as st
-from openai import OpenAI
 from dotenv import load_dotenv
 import os
 import json
@@ -8,7 +7,16 @@ import io
 from PIL import Image
 from pypdf import PdfReader
 import matplotlib.pyplot as plt
-import google.generativeai as genai
+from prompts.system_prompt import SYSTEM_PROMPT
+from prompts.pdf_prompt import PDF_PROMPT
+from prompts.pdf_chat_prompt import PDF_CHAT_PROMPT
+from utils.env_manager import save_key
+from utils.symptoms import extract_symptoms
+from utils.storage import load_data, save_data
+from llm.router import get_llm_response
+from utils.storage import DATA_FILE
+from prompts.pdf_chat_prompt import PDF_CHAT_PROMPT
+
 
 # ---------- LOAD ENV ----------
 env_path = ".env"
@@ -17,109 +25,14 @@ if not os.path.exists(env_path):
         f.write("")
 load_dotenv()
 
-# ---------- HELPER FUNCTIONS ----------
-def save_key(key_name, key_value):
-    os.environ[key_name] = key_value
-    env_file = ".env"
-    if not os.path.exists(env_file):
-        with open(env_file, "w") as f: f.write("")
-        
-    with open(env_file, "r") as f: lines = f.readlines()
-    
-    with open(env_file, "w") as f:
-        found = False
-        for line in lines:
-            if line.startswith(f"{key_name}="):
-                f.write(f"{key_name}={key_value}\n")
-                found = True
-            else:
-                f.write(line)
-        if not found:
-            f.write(f"\n{key_name}={key_value}\n")
 
-def get_llm_response(model, system, messages_history, image_data=None):
-    if model == "ChatGPT":
-        client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-        
-        # Prepare messages properly
-        final_messages = [{"role": "system", "content": system}]
-        
-        for msg in messages_history:
-            role = msg["role"]
-            content = msg["content"]
-            
-            # If it's the last user message and has image
-            if role == "user" and image_data and msg == messages_history[-1]:
-                user_content = [{"type": "text", "text": content}]
-                # image_data expected to be a PIL Image
-                buffered = io.BytesIO()
-                image_data.save(buffered, format="JPEG")
-                img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
-                user_content.append({
-                    "type": "image_url",
-                    "image_url": {"url": f"data:image/jpeg;base64,{img_str}"}
-                })
-                final_messages.append({"role": "user", "content": user_content})
-            else:
-                final_messages.append({"role": role, "content": content})
+# ---------- SESSION STATE INIT ----------
+if "messages" not in st.session_state:
+    st.session_state.messages = []
 
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=final_messages,
-            temperature=0.3
-        )
-        return response.choices[0].message.content
-        
-    elif model == "Gemini":
-        genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-        model_instance = genai.GenerativeModel('gemini-3-flash-preview')
-        
-        # Construct chat history for Gemini
-        chat_history = []
-        # Gemini expects alternate parts or a list of contents.
-        # We'll just build a large prompt or use start_chat if we convert properly.
-        # Simplest for now: concatenate context + use start_chat if structured
-        # Let's map to content format
-        
-        gemini_messages = []
-        
-        # Add system prompt as a user message or directive at start
-        gemini_messages.append({"role": "user", "parts": [system]})
-        gemini_messages.append({"role": "model", "parts": ["Understood. I will act as the medical assistant."]})
+if "severity_trend" not in st.session_state:
+    st.session_state.severity_trend = load_data()
 
-        for msg in messages_history:
-            role = "user" if msg["role"] == "user" else "model"
-            parts = [msg["content"]]
-            
-            if role == "user" and image_data and msg == messages_history[-1]:
-                 parts.append(image_data)
-            
-            gemini_messages.append({"role": role, "parts": parts})
-            
-        # Normally start_chat expects history to not include the last message technically if we use send_message
-        # But here we are doing a single generation usually.
-        # Let's just pass the full list to generate_content? No, generate_content takes a list of parts (single turn) usually unless formatted.
-        # Correct way for multi-turn in Gemini:
-        
-        chat = model_instance.start_chat(history=gemini_messages[:-1])
-        last_msg = gemini_messages[-1]
-        
-        # Safety settings to prevent over-blocking medical content
-        safety_settings = [
-            {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
-            {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
-            {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
-            {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
-        ]
-
-        try:
-            response = chat.send_message(last_msg["parts"], safety_settings=safety_settings)
-            return response.text
-        except Exception as e:
-            # Re-raise exception so caller can handle rate limits (429) vs other errors
-            raise e
-        
-    return "Error: No model selected."
 
 # ---------- PAGE CONFIG ----------
 st.set_page_config(
@@ -137,94 +50,6 @@ color:white">
 <p>Expert medical guidance • Health analytics • Privacy-first</p>
 </div>
 """, unsafe_allow_html=True)
-
-# ---------- SYSTEM PROMPTS ----------
-SYSTEM_PROMPT = """
-You are an expert medical assistant.
-Provide accurate, evidence-based medical information in a concise manner.
-DO NOT diagnose diseases or prescribe medicines.
-Context Usage:
-- ALWAYS use the conversation history to understand the user's current condition and previous statements.
-- If the user asks a follow-up question (e.g., "What if it's on the left side?"), answer specifically about that nuance relative to the previous context.
-- If the input is a new symptom description, follow the structure below.
-
-Response Structure (for new symptom descriptions):
-1. Potential causes (as briefly as possible)
-2. Immediate self-care steps (as briefly as possible)
-3. Warning signs requiring a doctor (as briefly as possible)
-4. Emergency alerts (if any) (as briefly as possible)
-
-Keep responses as short, direct, and to the point as possible. Use bullet points.
-Responses should be easy to understand for a general audience and avoid medical jargon, unless absolutely necessary.
-Keep a neutral and professional tone. Keep it short and avoid unnecessary fluff, to provide necessary info as soon as possible.
-Do not output internal thought processes or reasoning traces.
-Order the information logically, first providing the most critical details.
-End with a short standard medical disclaimer.
-"""
-
-PDF_PROMPT = """
-You are a medical expert analyzing a report.
-Your goal is to provide immediate, actionable, and accurate insights on the findings.
-DO NOT diagnose diseases or prescribe medicines.
-
-Structure your response for quick reading:
-1. **Key Findings**: Highlight abnormal values and their potential meaning.
-2. **Review**: Brief summary of critical normal results.
-3. **Next Steps**: When to consult a doctor based on these results.
-
-Constraints:
-- Keep it concise (under 150 words).
-- Use bullet points.
-- No fluff or filler words.
-- No internal thoughts.
-- End with a short medical disclaimer.
-- Order information logically, prioritizing critical details first.
-"""
-
-PDF_CHAT_PROMPT = """
-You are a medical expert answering questions about a specific medical report.
-Answer the user's question directly and concisely, using context from the provided report.
-DO NOT summarize the report again unless explicitly asked.
-DO NOT diagnose diseases or prescribe medicines.
-
-Constraints:
-- Answer ONLY what is asked.
-- Keep it short and direct.
-- Use simple language.
-- End with a short medical disclaimer.
-"""
-
-# ---------- SESSION STATE & DATA PERSISTENCE ----------
-DATA_FILE = "health_data.json"
-
-def load_data():
-    if os.path.exists(DATA_FILE):
-        with open(DATA_FILE, "r") as f:
-            try:
-                return json.load(f)
-            except json.JSONDecodeError:
-                return []
-    return []
-
-def save_data(data):
-    with open(DATA_FILE, "w") as f:
-        json.dump(data, f)
-
-if "severity_trend" not in st.session_state:
-    st.session_state.severity_trend = load_data()
-
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-
-# ---------- SYMPTOM EXTRACTION ----------
-def extract_symptoms(text):
-    keywords = [
-        "fever", "cough", "pain", "headache", "fatigue",
-        "vomiting", "nausea", "dizziness", "breath",
-        "infection", "diarrhea", "cold"
-    ]
-    text = text.lower()
-    return [k for k in keywords if k in text]
 
 # ---------- SIDEBAR ----------
 if st.sidebar.button("➕ New Chat"):
